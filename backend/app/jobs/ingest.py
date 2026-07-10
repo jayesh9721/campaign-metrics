@@ -39,10 +39,10 @@ def run_ingestion(since: date | None = None) -> dict:
         name = connector.__class__.__name__ + (f":{connector.platform}" if hasattr(connector, "platform") else "")
 
         campaigns = _clean(connector.fetch_campaigns())
-        db.upsert("campaigns", campaigns, on_conflict="campaign_id")
+        db.upsert("campaigns", campaigns, conflict_columns=["campaign_id"])
 
         daily_metrics = _clean(connector.fetch_daily_metrics(since))
-        db.upsert("campaign_daily_metrics", daily_metrics, on_conflict="campaign_id,date")
+        db.upsert("campaign_daily_metrics", daily_metrics, conflict_columns=["campaign_id", "date"])
 
         budget_changes = _clean(connector.fetch_budget_changes(since))
         db.insert_dedup(
@@ -51,10 +51,10 @@ def run_ingestion(since: date | None = None) -> dict:
         )
 
         audience = [r for r in _clean(connector.fetch_audience_data(since)) if r.get("segment_id") is not None]
-        db.upsert("audience_segments", audience, on_conflict="campaign_id,segment_id,date")
+        db.upsert("audience_segments", audience, conflict_columns=["campaign_id", "segment_id", "date"])
 
         creatives = [r for r in _clean(connector.fetch_creative_data(since)) if r.get("creative_id") is not None]
-        db.upsert("creatives", creatives, on_conflict="campaign_id,creative_id,date")
+        db.upsert("creatives", creatives, conflict_columns=["campaign_id", "creative_id", "date"])
 
         summary[name] = {
             "campaigns": len(campaigns),

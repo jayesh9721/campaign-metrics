@@ -5,12 +5,18 @@ here it never decides anything: it takes an already-decided, structured
 finding (root cause, confidence, recommended action, expected impact) and
 turns it into a sentence. Root-cause and priority decisions are made
 upstream, deterministically, in root_cause.py / recommendation.py.
+
+Routed through OpenRouter (OpenAI-compatible endpoint) rather than calling
+Anthropic directly, since that's the key available for this build - still
+Claude under the hood, just via a different gateway. OpenRouter's currently
+available slug for this model family is 'anthropic/claude-sonnet-5'.
 """
 from __future__ import annotations
 
-import anthropic
+import openai
 
-MODEL = "claude-sonnet-5"
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+MODEL = "anthropic/claude-sonnet-5"
 RATIONALE_MAX_TOKENS = 300
 SUMMARY_MAX_TOKENS = 400
 
@@ -23,14 +29,14 @@ FALLBACK_SUMMARY = (
 )
 
 
-def build_client(api_key: str) -> anthropic.Anthropic:
-    """Construct the Anthropic client. api_key is passed in explicitly by the
-    caller (FastAPI job layer) — this module never reads env vars itself."""
-    return anthropic.Anthropic(api_key=api_key)
+def build_client(api_key: str) -> openai.OpenAI:
+    """Construct the OpenRouter client. api_key is passed in explicitly by the
+    caller (FastAPI job layer) - this module never reads env vars itself."""
+    return openai.OpenAI(base_url=OPENROUTER_BASE_URL, api_key=api_key)
 
 
 def generate_rationale(
-    client: anthropic.Anthropic,
+    client: openai.OpenAI,
     campaign_name: str,
     metric: str,
     root_cause_label: str,
@@ -62,21 +68,20 @@ def generate_rationale(
         "Write the rationale now, using only the values above."
     )
     try:
-        response = client.messages.create(
+        response = client.chat.completions.create(
             model=MODEL,
             max_tokens=RATIONALE_MAX_TOKENS,
-            system=system,
-            messages=[{"role": "user", "content": user}],
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
         )
-        text = "".join(block.text for block in response.content if block.type == "text").strip()
+        text = (response.choices[0].message.content or "").strip()
         return text or FALLBACK_RATIONALE
     except Exception:
-        # Runs inside an automated pipeline job — an LLM/network failure must
+        # Runs inside an automated pipeline job - an LLM/network failure must
         # degrade gracefully, never crash the run.
         return FALLBACK_RATIONALE
 
 
-def summarize_top_recommendations(client: anthropic.Anthropic, recommendations: list[dict]) -> str:
+def summarize_top_recommendations(client: openai.OpenAI, recommendations: list[dict]) -> str:
     """Executive-summary paragraph for the 'AI Brief' view. `recommendations`
     is the top N pending rows, already sorted by priority_score by the caller."""
     system = (
@@ -99,13 +104,12 @@ def summarize_top_recommendations(client: anthropic.Anthropic, recommendations: 
     ]
     user = "Top pending recommendations, already sorted by priority_score:\n" + "\n".join(lines)
     try:
-        response = client.messages.create(
+        response = client.chat.completions.create(
             model=MODEL,
             max_tokens=SUMMARY_MAX_TOKENS,
-            system=system,
-            messages=[{"role": "user", "content": user}],
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
         )
-        text = "".join(block.text for block in response.content if block.type == "text").strip()
+        text = (response.choices[0].message.content or "").strip()
         return text or FALLBACK_SUMMARY
     except Exception:
         return FALLBACK_SUMMARY

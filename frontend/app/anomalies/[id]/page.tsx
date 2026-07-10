@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
-import type { AnomalyWithCampaign, CampaignDailyMetric, Recommendation } from "@/lib/types";
+import { ApiError, getAnomaly } from "@/lib/api";
+import type { AnomalyDetail } from "@/lib/types";
 import { formatDate, formatNumber, formatPercent, titleCase } from "@/lib/format";
 import { SeverityBadge, StatusBadge, TypeBadge } from "@/components/Badges";
 import Sparkline from "@/components/Sparkline";
+
+const POLL_INTERVAL_MS = 20_000;
 
 // Plain-language template per root_cause_label — the LLM already generated
 // `rationale` on any linked recommendation; this is a static fallback/summary
@@ -23,7 +25,7 @@ const ROOT_CAUSE_EXPLANATIONS: Record<string, string> = {
     "the campaign is still in the platform's learning phase after a recent change, so performance is temporarily volatile while the algorithm recalibrates.",
 };
 
-function explainRootCause(anomaly: AnomalyWithCampaign): string {
+function explainRootCause(anomaly: AnomalyDetail): string {
   if (!anomaly.root_cause_label) {
     return "The detection pipeline has not yet attributed a root cause to this anomaly.";
   }
@@ -38,9 +40,7 @@ export default function AnomalyDetailPage() {
   const params = useParams<{ id: string }>();
   const anomalyId = Number(params.id);
 
-  const [anomaly, setAnomaly] = useState<AnomalyWithCampaign | null>(null);
-  const [metrics, setMetrics] = useState<CampaignDailyMetric[]>([]);
-  const [linkedRecs, setLinkedRecs] = useState<Recommendation[]>([]);
+  const [anomaly, setAnomaly] = useState<AnomalyDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
@@ -53,41 +53,14 @@ export default function AnomalyDetailPage() {
     }
     try {
       setError(null);
-      const { data: anomalyRow, error: anomalyErr } = await supabase
-        .from("anomalies")
-        .select("*, campaigns(campaign_name, platform, brand)")
-        .eq("anomaly_id", anomalyId)
-        .maybeSingle();
-      if (anomalyErr) throw anomalyErr;
-      if (!anomalyRow) {
-        setNotFound(true);
-        setLoading(false);
-        return;
-      }
-      const a = anomalyRow as AnomalyWithCampaign;
-      setAnomaly(a);
-
-      const [{ data: metricRows, error: metricErr }, { data: recRows, error: recErr }] = await Promise.all([
-        supabase
-          .from("campaign_daily_metrics")
-          .select("*")
-          .eq("campaign_id", a.campaign_id)
-          .lte("date", a.detected_date)
-          .order("date", { ascending: false })
-          .limit(30),
-        supabase
-          .from("recommendations")
-          .select("*")
-          .eq("anomaly_id", a.anomaly_id)
-          .order("priority_score", { ascending: false }),
-      ]);
-      if (metricErr) throw metricErr;
-      if (recErr) throw recErr;
-
-      setMetrics(((metricRows as CampaignDailyMetric[]) ?? []).slice().reverse());
-      setLinkedRecs((recRows as Recommendation[]) ?? []);
+      const data = await getAnomaly(anomalyId);
+      setAnomaly(data);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load anomaly detail.");
+      if (e instanceof ApiError && e.status === 404) {
+        setNotFound(true);
+      } else {
+        setError(e instanceof Error ? e.message : "Failed to load anomaly detail.");
+      }
     } finally {
       setLoading(false);
     }
@@ -97,27 +70,20 @@ export default function AnomalyDetailPage() {
     load();
   }, [load]);
 
-  // Live updates: if the root cause gets attributed, or a linked recommendation
-  // is reviewed elsewhere, reflect it here without a refresh (spec Part 13).
+  // No more Supabase Realtime — poll the backend instead.
   useEffect(() => {
     if (!Number.isFinite(anomalyId)) return;
-    const channel = supabase
-      .channel(`anomaly-${anomalyId}-live`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "anomalies" }, () => load())
-      .on("postgres_changes", { event: "*", schema: "public", table: "recommendations" }, () => load())
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    const interval = setInterval(load, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
   }, [anomalyId, load]);
 
   const chartData = useMemo(() => {
     if (!anomaly) return [];
-    return metrics.map((m) => ({
+    return anomaly.daily_metrics.map((m) => ({
       date: m.date,
       value: (m as unknown as Record<string, number | null>)[anomaly.metric] ?? null,
     }));
-  }, [metrics, anomaly]);
+  }, [anomaly]);
 
   if (loading) {
     return <div className="text-sm text-slate-500 dark:text-slate-400">Loading anomaly…</div>;
@@ -134,6 +100,8 @@ export default function AnomalyDetailPage() {
     );
   }
 
+  const linkedRecs = anomaly.recommendations;
+
   return (
     <div className="space-y-6">
       <div>
@@ -142,12 +110,12 @@ export default function AnomalyDetailPage() {
         </Link>
         <div className="mt-2 flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-semibold tracking-tight">
-            {titleCase(anomaly.metric)} anomaly — {anomaly.campaigns?.campaign_name ?? anomaly.campaign_id}
+            {titleCase(anomaly.metric)} anomaly — {anomaly.campaign_name ?? anomaly.campaign_id}
           </h1>
           <SeverityBadge severity={anomaly.severity} />
         </div>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          {titleCase(anomaly.campaigns?.platform)} · Detected {formatDate(anomaly.detected_date)}
+          {titleCase(anomaly.platform)} · Detected {formatDate(anomaly.detected_date)}
         </p>
       </div>
 
@@ -156,7 +124,7 @@ export default function AnomalyDetailPage() {
       <div className="card p-5">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-medium text-slate-500 dark:text-slate-400">
-            {titleCase(anomaly.metric)} — trailing {metrics.length} days
+            {titleCase(anomaly.metric)} — trailing {anomaly.daily_metrics.length} days
           </h2>
         </div>
         <Sparkline data={chartData} highlightDate={anomaly.detected_date} />

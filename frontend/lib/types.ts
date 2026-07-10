@@ -1,5 +1,6 @@
-// Mirrors sql/schema.sql. Kept intentionally loose (nullable) since the
-// pipeline can leave fields unset (e.g. root_cause_label before the LLM runs).
+// Mirrors sql/schema.sql, as served by the FastAPI backend (Cloud SQL/Postgres
+// behind the scenes). Kept intentionally loose (nullable) since the pipeline
+// can leave fields unset (e.g. root_cause_label before the LLM runs).
 
 export type Platform = "meta" | "google_ads" | "linkedin" | "other" | string;
 export type CampaignStatus = "active" | "paused" | "ended" | string;
@@ -25,12 +26,11 @@ export interface Campaign {
   start_date: string | null;
   budget_cap: number | null;
   budget_type: string | null;
-  created_at: string | null;
 }
 
 export interface CampaignDailyMetric {
-  id: number;
-  campaign_id: string;
+  id?: number;
+  campaign_id?: string;
   date: string;
   impressions: number | null;
   clicks: number | null;
@@ -53,11 +53,16 @@ export interface Anomaly {
   severity: Severity;
   root_cause_label: RootCauseLabel;
   root_cause_confidence: number | null;
-  created_at: string | null;
+  created_at?: string | null;
 }
 
+// The backend joins campaign_name / platform / brand directly onto the
+// anomaly row (flattened), rather than nesting a `campaigns` object — see
+// GET /anomalies and GET /anomalies/{id} in the API contract.
 export interface AnomalyWithCampaign extends Anomaly {
-  campaigns: Pick<Campaign, "campaign_name" | "platform" | "brand"> | null;
+  campaign_name: string | null;
+  platform: Platform | null;
+  brand: string | null;
 }
 
 export interface Recommendation {
@@ -73,9 +78,43 @@ export interface Recommendation {
   status: RecommendationStatus;
   reviewed_by: string | null;
   reviewed_at: string | null;
-  created_at: string | null;
+  created_at?: string | null;
 }
 
+// Same flattening convention as AnomalyWithCampaign — see GET /recommendations.
 export interface RecommendationWithCampaign extends Recommendation {
-  campaigns: Pick<Campaign, "campaign_name" | "platform" | "brand"> | null;
+  campaign_name: string | null;
+  platform: Platform | null;
+  brand: string | null;
+}
+
+// GET /anomalies/{anomaly_id} — the anomaly (with joined campaign info) plus
+// its trailing daily metrics (for the sparkline) and any linked recommendations.
+export interface AnomalyDetail extends AnomalyWithCampaign {
+  daily_metrics: CampaignDailyMetric[];
+  recommendations: Recommendation[];
+}
+
+export interface TopRoasCampaign {
+  campaign_id: string;
+  campaign_name: string;
+  roas: number | null;
+  date: string;
+}
+
+export interface TopRecommendationSummary {
+  rec_id: number;
+  rationale: string | null;
+  priority_score: number | null;
+}
+
+// GET /dashboard-summary
+export interface DashboardSummary {
+  health_score: number;
+  active_alert_count: number;
+  pending_action_count: number;
+  top_roas_campaign: TopRoasCampaign | null;
+  most_urgent_anomaly: (AnomalyWithCampaign & { top_recommendation: TopRecommendationSummary | null }) | null;
+  time_saved_hours: number;
+  approval_rate_pct: number | null;
 }
