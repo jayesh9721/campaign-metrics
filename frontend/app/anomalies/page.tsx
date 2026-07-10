@@ -2,12 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { getAnomalies } from "@/lib/api";
+import { supabase } from "@/lib/supabaseClient";
 import type { AnomalyWithCampaign } from "@/lib/types";
 import { formatDate, formatPercent, severityRank, titleCase } from "@/lib/format";
 import { SeverityBadge } from "@/components/Badges";
-
-const POLL_INTERVAL_MS = 20_000;
 
 type SortKey = "detected_date" | "severity" | "metric" | "campaign";
 type SortDir = "asc" | "desc";
@@ -25,11 +23,12 @@ export default function AnomaliesPage() {
   const load = useCallback(async () => {
     try {
       setError(null);
-      // status=all: this page shows every anomaly regardless of open/closed
-      // status, matching the pre-migration behavior (there was no status
-      // filter in the UI here).
-      const data = await getAnomalies({ status: "all" });
-      setAnomalies(data ?? []);
+      const { data, error: err } = await supabase
+        .from("anomalies")
+        .select("*, campaigns(campaign_name, platform, brand)")
+        .order("detected_date", { ascending: false });
+      if (err) throw err;
+      setAnomalies((data as AnomalyWithCampaign[]) ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load anomalies.");
     } finally {
@@ -41,10 +40,17 @@ export default function AnomaliesPage() {
     load();
   }, [load]);
 
-  // No more Supabase Realtime — poll the backend instead.
+  // Live updates per spec Part 13 — no polling.
   useEffect(() => {
-    const interval = setInterval(load, POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
+    const channel = supabase
+      .channel("anomalies-live")
+      .on("postgres_changes", { event: "*", schema: "public", table: "anomalies" }, () => {
+        load();
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [load]);
 
   const metrics = useMemo(
@@ -65,9 +71,9 @@ export default function AnomaliesPage() {
         case "metric":
           return a.metric.localeCompare(b.metric) * dir;
         case "campaign":
-          return (
-            (a.campaign_name ?? a.campaign_id).localeCompare(b.campaign_name ?? b.campaign_id) * dir
-          );
+          return (a.campaigns?.campaign_name ?? a.campaign_id).localeCompare(
+            b.campaigns?.campaign_name ?? b.campaign_id,
+          ) * dir;
         default:
           return (new Date(a.detected_date).getTime() - new Date(b.detected_date).getTime()) * dir;
       }
@@ -131,8 +137,8 @@ export default function AnomaliesPage() {
               {filtered.map((a) => (
                 <tr key={a.anomaly_id} className="border-b border-[var(--border)] last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800/50">
                   <td className="px-4 py-3">
-                    <div className="font-medium">{a.campaign_name ?? a.campaign_id}</div>
-                    <div className="text-xs text-slate-400 dark:text-slate-500">{titleCase(a.platform)}</div>
+                    <div className="font-medium">{a.campaigns?.campaign_name ?? a.campaign_id}</div>
+                    <div className="text-xs text-slate-400 dark:text-slate-500">{titleCase(a.campaigns?.platform)}</div>
                   </td>
                   <td className="px-4 py-3">{titleCase(a.metric)}</td>
                   <td className="px-4 py-3">

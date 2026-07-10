@@ -21,46 +21,39 @@ LOOKBACK_DAYS = 120
 DEDUP_WINDOW_DAYS = 7
 
 
-def _load_type_stats() -> dict:
-    rows = db.query("SELECT * FROM recommendation_type_stats")
-    return {r["type"]: r for r in rows}
+def _load_type_stats(client) -> dict:
+    return {r["type"]: r for r in client.table("recommendation_type_stats").select("*").execute().data}
 
 
-def _has_pending_reallocation(campaign_id: str) -> bool:
-    since = date.today() - timedelta(days=DEDUP_WINDOW_DAYS)
-    rows = db.query(
-        """
-        SELECT rec_id FROM recommendations
-        WHERE campaign_id = :campaign_id
-          AND type = 'budget'
-          AND anomaly_id IS NULL
-          AND status = 'pending'
-          AND created_at >= :since
-        """,
-        {"campaign_id": campaign_id, "since": since},
+def _has_pending_reallocation(client, campaign_id: str) -> bool:
+    since = (date.today() - timedelta(days=DEDUP_WINDOW_DAYS)).isoformat()
+    res = (
+        client.table("recommendations")
+        .select("rec_id")
+        .eq("campaign_id", campaign_id)
+        .eq("type", "budget")
+        .is_("anomaly_id", "null")
+        .eq("status", "pending")
+        .gte("created_at", since)
+        .execute()
     )
-    return len(rows) > 0
+    return len(res.data) > 0
 
 
 def run_recommendation() -> dict:
-    since = date.today() - timedelta(days=LOOKBACK_DAYS)
+    client = db.get_client()
+    since = (date.today() - timedelta(days=LOOKBACK_DAYS)).isoformat()
 
-    unresolved = db.query("SELECT * FROM anomalies WHERE root_cause_label IS NULL")
+    unresolved = client.table("anomalies").select("*").is_("root_cause_label", "null").execute().data
 
     # The cross-campaign ROAS-reallocation check runs over ALL campaigns (it
     # doesn't require an anomaly to fire), so pull broadly rather than scoping
     # to just the unresolved anomalies' campaigns.
-    daily_metrics = pd.DataFrame(
-        db.query("SELECT * FROM campaign_daily_metrics WHERE date >= :since", {"since": since})
-    )
-    campaigns = pd.DataFrame(db.query("SELECT * FROM campaigns"))
-    budget_changes = pd.DataFrame(db.query("SELECT * FROM budget_change_log"))
-    audience = pd.DataFrame(
-        db.query("SELECT * FROM audience_segments WHERE date >= :since", {"since": since})
-    )
-    creatives = pd.DataFrame(
-        db.query("SELECT * FROM creatives WHERE date >= :since", {"since": since})
-    )
+    daily_metrics = pd.DataFrame(client.table("campaign_daily_metrics").select("*").gte("date", since).execute().data)
+    campaigns = pd.DataFrame(client.table("campaigns").select("*").execute().data)
+    budget_changes = pd.DataFrame(client.table("budget_change_log").select("*").execute().data)
+    audience = pd.DataFrame(client.table("audience_segments").select("*").gte("date", since).execute().data)
+    creatives = pd.DataFrame(client.table("creatives").select("*").gte("date", since).execute().data)
 
     if not unresolved and daily_metrics.empty:
         return {"anomalies_processed": 0, "recommendations_created": 0}
@@ -71,22 +64,17 @@ def run_recommendation() -> dict:
 
     for a in resolved_anomalies:
         if a.get("root_cause_label") is not None:
-            db.execute(
-                "UPDATE anomalies SET root_cause_label = :label, root_cause_confidence = :conf WHERE anomaly_id = :id",
-                {
-                    "label": a["root_cause_label"],
-                    "conf": a["root_cause_confidence"],
-                    "id": a["anomaly_id"],
-                },
-            )
+            client.table("anomalies").update(
+                {"root_cause_label": a["root_cause_label"], "root_cause_confidence": a["root_cause_confidence"]}
+            ).eq("anomaly_id", a["anomaly_id"]).execute()
 
     candidates = [
         c
         for c in candidates
-        if not (c["type"] == "budget" and c.get("anomaly_id") is None and _has_pending_reallocation(c["campaign_id"]))
+        if not (c["type"] == "budget" and c.get("anomaly_id") is None and _has_pending_reallocation(client, c["campaign_id"]))
     ]
 
-    type_stats_rows = _load_type_stats()
+    type_stats_rows = _load_type_stats(client)
     base_confidence = {t: r["base_confidence"] for t, r in type_stats_rows.items()}
     type_stats = {
         t: {"approved_count": r["approved_count"], "rejected_count": r["rejected_count"]}
@@ -100,7 +88,7 @@ def run_recommendation() -> dict:
     campaign_names = (
         {c["campaign_id"]: c["campaign_name"] for c in campaigns.to_dict("records")} if not campaigns.empty else {}
     )
-    llm_client = build_client(settings.openrouter_api_key) if settings.openrouter_api_key else None
+    llm_client = build_client(settings.anthropic_api_key) if settings.anthropic_api_key else None
 
     inserted = []
     for rec in recs:
