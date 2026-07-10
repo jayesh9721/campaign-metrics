@@ -11,7 +11,9 @@ class Settings:
     meta_access_token: str = os.environ.get("META_ACCESS_TOKEN", "")
     meta_ad_account_id: str = os.environ.get("META_AD_ACCOUNT_ID", "")
 
-    anthropic_api_key: str = os.environ.get("ANTHROPIC_API_KEY", "")
+    # LLM routed through OpenRouter (OpenAI-compatible endpoint) rather than
+    # calling Anthropic directly - see app/engine/llm_rationale.py.
+    openrouter_api_key: str = os.environ.get("OPENROUTER_API_KEY", "")
 
     google_ads_developer_token: str = os.environ.get("GOOGLE_ADS_DEVELOPER_TOKEN", "")
     google_ads_client_id: str = os.environ.get("GOOGLE_ADS_CLIENT_ID", "")

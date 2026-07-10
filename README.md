@@ -27,7 +27,7 @@ Everything above the connector layer reads/writes only the normalized schema —
 1. Copy `.env.example` to `.env` in the repo root and fill in:
    - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (Supabase dashboard -> Settings -> API)
    - `META_ACCESS_TOKEN` (already confirmed working against `act_906650389058071`, "Toga health")
-   - `ANTHROPIC_API_KEY`
+   - `OPENROUTER_API_KEY` (LLM rationale layer is routed through OpenRouter, model `anthropic/claude-sonnet-5`, rather than calling Anthropic directly)
    - `PIPELINE_TRIGGER_SECRET` (any random string — shared secret between the Edge Function and FastAPI)
 2. Run `sql/schema.sql` in the Supabase SQL editor (creates all tables).
 3. Backend:
@@ -79,7 +79,7 @@ gcloud run deploy copilot-frontend --source frontend --region us-central1 --allo
 Ongoing deploys via GitHub Actions (`.github/workflows/deploy.yml`) — push to `main`
 triggers both. Requires these repo secrets:
 - `GCP_PROJECT_ID`, `GCP_SA_KEY` (a service account JSON key with Cloud Run Admin + Artifact Registry Admin + Service Account User roles)
-- `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `META_ACCESS_TOKEN`, `META_AD_ACCOUNT_ID`, `ANTHROPIC_API_KEY`, `PIPELINE_TRIGGER_SECRET`
+- `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `META_ACCESS_TOKEN`, `META_AD_ACCOUNT_ID`, `OPENROUTER_API_KEY`, `PIPELINE_TRIGGER_SECRET`
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_API_URL`
 
 ## Known limitations (documented, not silently swallowed)

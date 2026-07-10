@@ -88,7 +88,7 @@ def run_recommendation() -> dict:
     campaign_names = (
         {c["campaign_id"]: c["campaign_name"] for c in campaigns.to_dict("records")} if not campaigns.empty else {}
     )
-    llm_client = build_client(settings.anthropic_api_key) if settings.anthropic_api_key else None
+    llm_client = build_client(settings.openrouter_api_key) if settings.openrouter_api_key else None
 
     inserted = []
     for rec in recs:
