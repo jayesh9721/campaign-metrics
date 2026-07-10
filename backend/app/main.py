@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app import db
 from app.config import settings
+from app.jobs.csv_import import CsvImportError, run_csv_import
 from app.jobs.detect import run_detection
 from app.jobs.ingest import run_ingestion
 from app.jobs.recommend import run_recommendation
@@ -50,6 +51,17 @@ def jobs_detect(x_pipeline_secret: str | None = Header(default=None)) -> dict:
 def jobs_recommend(x_pipeline_secret: str | None = Header(default=None)) -> dict:
     _check_pipeline_secret(x_pipeline_secret)
     return run_recommendation()
+
+
+@app.post("/jobs/upload-csv")
+async def jobs_upload_csv(file: UploadFile = File(...)) -> dict:
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Please upload a .csv file")
+    content = await file.read()
+    try:
+        return run_csv_import(content)
+    except CsvImportError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 class ReviewRequest(BaseModel):

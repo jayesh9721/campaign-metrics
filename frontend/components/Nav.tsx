@@ -7,6 +7,7 @@ const LINKS = [
   { href: "/", label: "Dashboard" },
   { href: "/anomalies", label: "Anomalies" },
   { href: "/recommendations", label: "Recommendations" },
+  { href: "/upload", label: "Upload Data" },
 ];
 
 export default function Nav() {

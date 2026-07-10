@@ -44,6 +44,28 @@ Everything above the connector layer reads/writes only the normalized schema —
    npm run dev
    ```
 
+## Manual CSV import
+
+The dashboard's **Upload Data** page (`frontend/app/upload/page.tsx`, backed by
+`POST /jobs/upload-csv`) acts as a user-supplied connector — a spreadsheet
+lands in the same normalized schema every real connector writes to, so
+detection/root-cause/recommendations run over it identically. Required
+columns: `campaign_id, campaign_name, platform, date, impressions, clicks,
+spend`. Optional: `brand, account_id, objective, bid_strategy, status,
+start_date, budget_cap, budget_type, conversions, revenue, frequency, ctr,
+cpc, conversion_rate, roas, cpa` — any of the last five that are omitted get
+computed automatically from the raw numbers. A sample file with 28 days of
+realistic data (including a deliberate CTR drop, so uploading it and hitting
+Sync Now visibly produces a real anomaly) lives at
+`sql/sample-campaign-data.csv` and is also downloadable from the Upload page
+itself.
+
+Scope limitation: the CSV only carries campaign + daily-metric data, not
+creative- or audience-level detail, so `creative_fatigue`/`audience_fatigue`
+root causes never fire on uploaded data — only `budget_cap`, `bidding`, and
+the cross-campaign ROAS reallocation check can, since those only need
+`campaigns` + `campaign_daily_metrics`.
+
 ## Scheduling
 
 Chosen: **pg_cron + Supabase Edge Function**, per spec Part 12. The Edge Function
