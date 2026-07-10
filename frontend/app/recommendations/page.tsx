@@ -18,6 +18,7 @@ export default function RecommendationsPage() {
 
   const [statusFilter, setStatusFilter] = useState<string>("pending");
   const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [campaignFilter, setCampaignFilter] = useState<string>("all");
 
   const load = useCallback(async () => {
     try {
@@ -53,12 +54,21 @@ export default function RecommendationsPage() {
     };
   }, [load]);
 
+  const campaignOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const r of recommendations) {
+      if (!seen.has(r.campaign_id)) seen.set(r.campaign_id, r.campaigns?.campaign_name ?? r.campaign_id);
+    }
+    return Array.from(seen.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+  }, [recommendations]);
+
   const filtered = useMemo(() => {
     let rows = recommendations;
     if (statusFilter !== "all") rows = rows.filter((r) => r.status === statusFilter);
     if (typeFilter !== "all") rows = rows.filter((r) => r.type === typeFilter);
+    if (campaignFilter !== "all") rows = rows.filter((r) => r.campaign_id === campaignFilter);
     return rows;
-  }, [recommendations, statusFilter, typeFilter]);
+  }, [recommendations, statusFilter, typeFilter, campaignFilter]);
 
   const handleReview = useCallback(
     async (rec: RecommendationWithCampaign, status: "approved" | "rejected") => {
@@ -112,6 +122,21 @@ export default function RecommendationsPage() {
           options={["all", "pending", "approved", "rejected"]}
         />
         <Filter label="Type" value={typeFilter} onChange={setTypeFilter} options={["all", "budget", "bidding", "creative"]} />
+        <label className="flex items-center gap-2 text-sm">
+          <span className="text-slate-500 dark:text-slate-400">Campaign</span>
+          <select
+            className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm"
+            value={campaignFilter}
+            onChange={(e) => setCampaignFilter(e.target.value)}
+          >
+            <option value="all">All</option>
+            {campaignOptions.map(([id, name]) => (
+              <option key={id} value={id}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
         <div className="ml-auto text-xs text-slate-400 dark:text-slate-500">
           {filtered.length} of {recommendations.length} recommendations
         </div>

@@ -21,9 +21,12 @@ def get_connectors() -> list:
     if settings.meta_access_token and settings.meta_ad_account_id:
         connectors.append(MetaConnector(settings.meta_access_token, settings.meta_ad_account_id))
     # LinkedIn / "other" have no real API access yet (spec Part 16) - mocked,
-    # same schema, same polling cadence as the real connector.
-    connectors.append(MockConnector("linkedin"))
-    connectors.append(MockConnector("other"))
+    # same schema, same polling cadence as the real connector. Gated behind
+    # ENABLE_MOCK_CONNECTORS (off by default) so a routine sync doesn't
+    # silently reintroduce synthetic data while the demo is Meta-only.
+    if settings.enable_mock_connectors:
+        connectors.append(MockConnector("linkedin"))
+        connectors.append(MockConnector("other"))
     return connectors
 
 

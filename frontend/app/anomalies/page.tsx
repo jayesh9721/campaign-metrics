@@ -17,6 +17,9 @@ export default function AnomaliesPage() {
 
   const [severityFilter, setSeverityFilter] = useState<string>("all");
   const [metricFilter, setMetricFilter] = useState<string>("all");
+  const [campaignFilter, setCampaignFilter] = useState<string>("all");
+  const [dateFrom, setDateFrom] = useState<string>("");
+  const [dateTo, setDateTo] = useState<string>("");
   const [sortKey, setSortKey] = useState<SortKey>("detected_date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
@@ -58,10 +61,21 @@ export default function AnomaliesPage() {
     [anomalies],
   );
 
+  const campaignOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const a of anomalies) {
+      if (!seen.has(a.campaign_id)) seen.set(a.campaign_id, a.campaigns?.campaign_name ?? a.campaign_id);
+    }
+    return Array.from(seen.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+  }, [anomalies]);
+
   const filtered = useMemo(() => {
     let rows = anomalies;
     if (severityFilter !== "all") rows = rows.filter((a) => a.severity === severityFilter);
     if (metricFilter !== "all") rows = rows.filter((a) => a.metric === metricFilter);
+    if (campaignFilter !== "all") rows = rows.filter((a) => a.campaign_id === campaignFilter);
+    if (dateFrom) rows = rows.filter((a) => a.detected_date >= dateFrom);
+    if (dateTo) rows = rows.filter((a) => a.detected_date <= dateTo);
 
     const dir = sortDir === "asc" ? 1 : -1;
     rows = [...rows].sort((a, b) => {
@@ -79,7 +93,7 @@ export default function AnomaliesPage() {
       }
     });
     return rows;
-  }, [anomalies, severityFilter, metricFilter, sortKey, sortDir]);
+  }, [anomalies, severityFilter, metricFilter, campaignFilter, dateFrom, dateTo, sortKey, sortDir]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -109,6 +123,51 @@ export default function AnomaliesPage() {
           onChange={setMetricFilter}
           options={["all", ...metrics]}
         />
+        <label className="flex items-center gap-2 text-sm">
+          <span className="text-slate-500 dark:text-slate-400">Campaign</span>
+          <select
+            className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm"
+            value={campaignFilter}
+            onChange={(e) => setCampaignFilter(e.target.value)}
+          >
+            <option value="all">All</option>
+            {campaignOptions.map(([id, name]) => (
+              <option key={id} value={id}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <span className="text-slate-500 dark:text-slate-400">From</span>
+          <input
+            type="date"
+            className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+          />
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <span className="text-slate-500 dark:text-slate-400">To</span>
+          <input
+            type="date"
+            className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+          />
+        </label>
+        {(campaignFilter !== "all" || dateFrom || dateTo) && (
+          <button
+            onClick={() => {
+              setCampaignFilter("all");
+              setDateFrom("");
+              setDateTo("");
+            }}
+            className="text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+          >
+            Clear
+          </button>
+        )}
         <div className="ml-auto text-xs text-slate-400 dark:text-slate-500">
           {filtered.length} of {anomalies.length} anomalies
         </div>

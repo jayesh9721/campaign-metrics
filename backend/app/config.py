@@ -11,6 +11,10 @@ class Settings:
     meta_access_token: str = os.environ.get("META_ACCESS_TOKEN", "")
     meta_ad_account_id: str = os.environ.get("META_AD_ACCOUNT_ID", "")
 
+    # Off by default while focusing the demo on real Meta data only. Flip to
+    # "true" to also ingest synthetic LinkedIn/"other" data (spec Part 11).
+    enable_mock_connectors: bool = os.environ.get("ENABLE_MOCK_CONNECTORS", "false").lower() == "true"
+
     # LLM routed through OpenRouter (OpenAI-compatible endpoint) rather than
     # calling Anthropic directly - see app/engine/llm_rationale.py.
     openrouter_api_key: str = os.environ.get("OPENROUTER_API_KEY", "")

@@ -14,12 +14,25 @@ interface TopRoasRow {
   campaigns: { campaign_name: string; platform: string } | null;
 }
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
+
+interface SyncResult {
+  ingest?: Record<string, { campaigns: number; daily_metrics: number; budget_changes: number; audience_rows: number; creative_rows: number }>;
+  detect?: { anomalies_detected: number };
+  recommend?: { anomalies_processed: number; recommendations_created: number };
+}
+
 export default function DashboardPage() {
   const [anomalies, setAnomalies] = useState<AnomalyWithCampaign[]>([]);
   const [recommendations, setRecommendations] = useState<RecommendationWithCampaign[]>([]);
   const [topRoas, setTopRoas] = useState<TopRoasRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [syncing, setSyncing] = useState(false);
+  const [syncStep, setSyncStep] = useState<string | null>(null);
+  const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   const loadAnomaliesAndRecs = useCallback(async () => {
     const [{ data: anomalyData, error: anomalyErr }, { data: recData, error: recErr }] = await Promise.all([
@@ -73,6 +86,44 @@ export default function DashboardPage() {
 
   useEffect(() => {
     loadAll();
+  }, [loadAll]);
+
+  const runSync = useCallback(async () => {
+    if (!API_URL) {
+      setSyncError("NEXT_PUBLIC_API_URL is not configured.");
+      return;
+    }
+    setSyncing(true);
+    setSyncError(null);
+    setSyncResult(null);
+    const result: SyncResult = {};
+    try {
+      setSyncStep("Pulling latest campaign data…");
+      const ingestRes = await fetch(`${API_URL}/jobs/ingest`, { method: "POST" });
+      if (!ingestRes.ok) throw new Error(`Ingest failed (${ingestRes.status})`);
+      result.ingest = await ingestRes.json();
+      setSyncResult({ ...result });
+
+      setSyncStep("Scanning for anomalies…");
+      const detectRes = await fetch(`${API_URL}/jobs/detect`, { method: "POST" });
+      if (!detectRes.ok) throw new Error(`Anomaly detection failed (${detectRes.status})`);
+      result.detect = await detectRes.json();
+      setSyncResult({ ...result });
+
+      setSyncStep("Diagnosing root causes and writing recommendations…");
+      const recommendRes = await fetch(`${API_URL}/jobs/recommend`, { method: "POST" });
+      if (!recommendRes.ok) throw new Error(`Recommendation generation failed (${recommendRes.status})`);
+      result.recommend = await recommendRes.json();
+      setSyncResult({ ...result });
+
+      setSyncStep(null);
+      await loadAll();
+    } catch (e) {
+      setSyncError(e instanceof Error ? e.message : "Sync failed.");
+      setSyncStep(null);
+    } finally {
+      setSyncing(false);
+    }
   }, [loadAll]);
 
   // Live updates: refetch whenever anomalies/recommendations change server-side
@@ -156,12 +207,59 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400">
-          Live portfolio overview across all connected campaigns.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Live portfolio overview across all connected campaigns.
+          </p>
+        </div>
+        <button
+          onClick={runSync}
+          disabled={syncing}
+          className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+        >
+          {syncing ? (syncStep ?? "Syncing…") : "Sync Now"}
+        </button>
       </div>
+
+      {syncError && (
+        <div className="card p-4 text-sm text-red-600 dark:text-red-400">Sync failed: {syncError}</div>
+      )}
+
+      {syncResult && !syncing && (
+        <div className="card p-4 text-sm">
+          <div className="font-medium">Sync complete — real data pulled and processed:</div>
+          <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            {syncResult.ingest && (
+              <div>
+                <div className="text-xs uppercase text-slate-400 dark:text-slate-500">Ingested</div>
+                {Object.entries(syncResult.ingest).map(([source, counts]) => (
+                  <div key={source} className="text-xs text-slate-500 dark:text-slate-400">
+                    {source}: {counts.campaigns} campaigns, {counts.daily_metrics} metric rows
+                  </div>
+                ))}
+              </div>
+            )}
+            {syncResult.detect && (
+              <div>
+                <div className="text-xs uppercase text-slate-400 dark:text-slate-500">Detected</div>
+                <div className="text-lg font-semibold">{syncResult.detect.anomalies_detected}</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400">new anomalies</div>
+              </div>
+            )}
+            {syncResult.recommend && (
+              <div>
+                <div className="text-xs uppercase text-slate-400 dark:text-slate-500">Recommended</div>
+                <div className="text-lg font-semibold">{syncResult.recommend.recommendations_created}</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                  from {syncResult.recommend.anomalies_processed} anomalies processed
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
