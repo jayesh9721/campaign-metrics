@@ -1,3 +1,5 @@
+import datetime
+
 from supabase import create_client, Client
 from app.config import settings
 
@@ -11,16 +13,30 @@ def get_client() -> Client:
     return _client
 
 
+def _jsonable(value):
+    """postgrest-py hands rows straight to stdlib json.dumps, which doesn't
+    know how to serialize date/datetime - connectors return those natively
+    (e.g. Meta's start_date, launch_date), so normalize to ISO strings here
+    rather than pushing this concern onto every connector."""
+    if isinstance(value, (datetime.date, datetime.datetime)):
+        return value.isoformat()
+    return value
+
+
+def _clean_rows(rows: list[dict]) -> list[dict]:
+    return [{k: _jsonable(v) for k, v in row.items()} for row in rows]
+
+
 def upsert(table: str, rows: list[dict], on_conflict: str) -> None:
     if not rows:
         return
-    get_client().table(table).upsert(rows, on_conflict=on_conflict).execute()
+    get_client().table(table).upsert(_clean_rows(rows), on_conflict=on_conflict).execute()
 
 
 def insert(table: str, rows: list[dict]) -> list[dict]:
     if not rows:
         return []
-    res = get_client().table(table).insert(rows).execute()
+    res = get_client().table(table).insert(_clean_rows(rows)).execute()
     return res.data
 
 
@@ -39,4 +55,4 @@ def insert_dedup(table: str, rows: list[dict], key_fields: list[str]) -> None:
     existing_keys = {tuple(r.get(k) for k in key_fields) for r in existing.data}
     new_rows = [r for r in rows if tuple(r.get(k) for k in key_fields) not in existing_keys]
     if new_rows:
-        client.table(table).insert(new_rows).execute()
+        client.table(table).insert(_clean_rows(new_rows)).execute()

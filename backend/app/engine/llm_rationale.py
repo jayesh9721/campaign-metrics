@@ -6,17 +6,19 @@ finding (root cause, confidence, recommended action, expected impact) and
 turns it into a sentence. Root-cause and priority decisions are made
 upstream, deterministically, in root_cause.py / recommendation.py.
 
-Routed through OpenRouter (OpenAI-compatible endpoint) rather than calling
-Anthropic directly, since that's the key available for this build - still
-Claude under the hood, just via a different gateway. OpenRouter's currently
-available slug for this model family is 'anthropic/claude-sonnet-5'.
+Routed through OpenRouter (OpenAI-compatible endpoint). Model is Gemini 2.5
+Flash - the OpenRouter account this build uses has a data-policy restriction
+that blocks Anthropic models ("no endpoints available matching your guardrail
+restrictions" - see openrouter.ai/settings/privacy to lift that), and
+gemini-3.5-flash returned empty content on this account, so 2.5-flash is the
+verified-working choice.
 """
 from __future__ import annotations
 
 import openai
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-MODEL = "anthropic/claude-sonnet-5"
+MODEL = "google/gemini-2.5-flash"
 RATIONALE_MAX_TOKENS = 300
 SUMMARY_MAX_TOKENS = 400
 
