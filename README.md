@@ -54,33 +54,43 @@ business logic, it just calls the FastAPI backend's `/jobs/ingest`, `/jobs/detec
 
 Setup:
 1. Enable the `pg_cron` and `pg_net` extensions in the Supabase dashboard (Database -> Extensions).
-2. Deploy the Edge Function: `supabase functions deploy trigger-pipeline` (set `BACKEND_URL` and `PIPELINE_TRIGGER_SECRET` as function secrets via `supabase secrets set`).
+2. Deploy the Edge Function: `supabase functions deploy trigger-pipeline` (set `BACKEND_URL` to your Render backend URL and `PIPELINE_TRIGGER_SECRET` as function secrets via `supabase secrets set`).
 3. Run `sql/schedule_cron.sql` in the SQL editor, filling in your project ref and anon key.
 
-## Deploying to GCP (Cloud Run)
+## Deploying: Render (backend) + Vercel (frontend)
 
-One-time setup (run these yourself — `gcloud auth login` needs an interactive
-browser, which this build environment can't do):
+No GCP, no billing card, no CLI auth dance — both platforms deploy straight
+from the GitHub repo and auto-redeploy on every push to `main`.
 
-```
-gcloud auth login
-gcloud projects create <PROJECT_ID>          # or use an existing project
-gcloud config set project <PROJECT_ID>
-gcloud services enable run.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com
-```
+### Backend on Render
 
-Manual first deploy (fastest path to a demo URL today):
-```
-gcloud run deploy copilot-backend --source backend --region us-central1 --allow-unauthenticated
-gcloud run deploy copilot-frontend --source frontend --region us-central1 --allow-unauthenticated \
-  --set-build-env-vars NEXT_PUBLIC_SUPABASE_URL=...,NEXT_PUBLIC_SUPABASE_ANON_KEY=...,NEXT_PUBLIC_API_URL=<backend-url-from-previous-command>
-```
+1. Sign in to [render.com](https://render.com) with GitHub.
+2. **New +** → **Blueprint** → select the `Campaign-Whisperer` repo. Render
+   reads `render.yaml` at the repo root automatically and proposes the
+   `campaign-copilot-backend` web service (Python, free plan, root dir
+   `backend`, `uvicorn app.main:app --host 0.0.0.0 --port $PORT`).
+3. It'll prompt for the env vars marked `sync: false` in `render.yaml` — fill in:
+   `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `META_ACCESS_TOKEN`,
+   `META_AD_ACCOUNT_ID`, `OPENROUTER_API_KEY`, `PIPELINE_TRIGGER_SECRET`
+   (same values as your local `.env`).
+4. Deploy. Copy the resulting URL (`https://campaign-copilot-backend-xxxx.onrender.com`).
+5. Confirm it's alive: `curl https://<your-render-url>/health` → `{"status":"ok"}`.
 
-Ongoing deploys via GitHub Actions (`.github/workflows/deploy.yml`) — push to `main`
-triggers both. Requires these repo secrets:
-- `GCP_PROJECT_ID`, `GCP_SA_KEY` (a service account JSON key with Cloud Run Admin + Artifact Registry Admin + Service Account User roles)
-- `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `META_ACCESS_TOKEN`, `META_AD_ACCOUNT_ID`, `OPENROUTER_API_KEY`, `PIPELINE_TRIGGER_SECRET`
-- `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_API_URL`
+Free-tier note: the service sleeps after 15 minutes idle and takes ~30-50s to
+wake on the next request. Since the automation cron also fires every 15
+minutes, expect the first hit after a quiet period to be slow but not fail —
+upgrade to a paid instance if that latency becomes a problem for the demo.
+
+### Frontend on Vercel
+
+1. Sign in to [vercel.com](https://vercel.com) with GitHub.
+2. **Add New** → **Project** → import `Campaign-Whisperer`.
+3. In the import screen, set **Root Directory** to `frontend` (Vercel
+   auto-detects Next.js once you do).
+4. Add env vars: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   (same as `frontend/.env.local`), and `NEXT_PUBLIC_API_URL` = the Render
+   backend URL from step above.
+5. Deploy. Vercel gives you a `https://campaign-whisperer.vercel.app`-style URL.
 
 ## Known limitations (documented, not silently swallowed)
 
