@@ -1,6 +1,14 @@
 # AI Campaign Optimization Copilot
 
-Built against `PROJECT_BUILD_SPEC.md`. See that file for the full spec this implements.
+An always-on copilot for paid-media teams. It pulls campaign data from ad platforms (or a CSV upload), normalizes it into one schema, detects anomalies such as CTR drops or budget caps, works out the likely root cause, and recommends what to change, with an AI-written rationale for every recommendation.
+
+**Highlights**
+- Connector layer: Meta Ads (live), LinkedIn and others (mocked), Google Ads (stub), plus manual CSV upload
+- Anomaly detection → root-cause engine → recommendation engine, with Claude-generated explanations
+- Runs on a schedule (Supabase `pg_cron` → Edge Function → FastAPI jobs) or on demand with **Sync Now**
+- Real-time dashboard via Supabase Realtime, with campaign and date filters
+
+**Stack:** Python · FastAPI · Next.js · Tailwind CSS · Supabase (Postgres, Realtime, Edge Functions) · OpenRouter (Claude) · Docker · Render
 
 ## Architecture
 
@@ -20,13 +28,13 @@ FastAPI job endpoints (backend/app/jobs/*)  <-- triggered every 15 min by
 Next.js frontend (Supabase Realtime subscriptions on anomalies/recommendations)
 ```
 
-Everything above the connector layer reads/writes only the normalized schema — no module calls a platform API directly (spec Part 3).
+Everything above the connector layer reads/writes only the normalized schema — no module calls a platform API directly.
 
 ## Local setup
 
 1. Copy `.env.example` to `.env` in the repo root and fill in:
    - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (Supabase dashboard -> Settings -> API)
-   - `META_ACCESS_TOKEN` (already confirmed working against `act_906650389058071`, "Toga health")
+   - `META_ACCESS_TOKEN`
    - `OPENROUTER_API_KEY` (LLM rationale layer is routed through OpenRouter, model `anthropic/claude-sonnet-5`, rather than calling Anthropic directly)
    - `PIPELINE_TRIGGER_SECRET` (any random string — shared secret between the Edge Function and FastAPI)
 2. Run `sql/schema.sql` in the Supabase SQL editor (creates all tables).
@@ -68,7 +76,7 @@ the cross-campaign ROAS reallocation check can, since those only need
 
 ## Scheduling
 
-Chosen: **pg_cron + Supabase Edge Function**, per spec Part 12. The Edge Function
+Chosen: **pg_cron + Supabase Edge Function**. The Edge Function
 (`supabase/functions/trigger-pipeline`) is a thin bridge — it does not contain
 business logic, it just calls the FastAPI backend's `/jobs/ingest`, `/jobs/detect`,
 `/jobs/recommend` endpoints in sequence. This keeps all real logic in Python
@@ -119,6 +127,11 @@ upgrade to a paid instance if that latency becomes a problem for the demo.
 - Meta `budget_change_log` ingestion is best-effort — Meta's `/activities` edge
   doesn't cleanly expose old/new budget values for every event type. Rows are
   only written when both values are parseable.
-- Google Ads connector is a stub per spec Part 16 — wire in once API access is confirmed.
+- Google Ads connector is a stub — wire in once API access is confirmed.
 - Ad account has 27 ads, not the 400+ mentioned in the original brief — confirmed
   with the user this is the correct account to build/demo against for now.
+
+
+## License
+
+MIT, see [LICENSE](LICENSE).
